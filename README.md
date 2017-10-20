@@ -14,3 +14,17 @@ and [leetcode-cli](https://www.npmjs.com/package/leetcode-cli).
 - pick a question, generate a local file with default code
 - test your solution in local file, with customizable test cases
 - submit your solution
+
+# TODO
+
+performance:
+- make the request for test result concurrent
+- optimize all the network request, maybe asyncio?
+
+ux:
+- better formatted, detailed submission result
+- better looking refer to the `leetcode-cli` project
+- more programming languages
+- more websites
+
+
