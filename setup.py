@@ -11,8 +11,10 @@ setup(
     packages=['pracode'],
     install_requires=[
         'requests',
+        'bs4',
+        'browser_cookies3',
     ],
     entry_points = {
-        'console_scripts': ['pc=pracode.main:main'],
+        'console_scripts': ['pracode=pracode.main:main'],
     }
 )

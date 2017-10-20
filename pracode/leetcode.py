@@ -1,7 +1,6 @@
 import cmd
 import os.path
 import re
-from functools import partial
 import time
 
 import requests
@@ -17,19 +16,19 @@ class LeetCode(cmd.Cmd):
 
     def __init__(self):
         super().__init__()
-        self._name = 'LeetCode'
+        self._name = 'LC'
+        self._problems = []
         self._id = 0
         self._title = ''
         self._lang = 'python'
         self._testcase = ''
-        self._cookiejar = browser_cookie3.chrome(domain_name='leetcode.com')
+
+        _cookiejar = browser_cookie3.chrome(domain_name='leetcode.com')
+        self._csrftoken = requests.utils.dict_from_cookiejar(_cookiejar)['csrftoken']
         self._session = requests.Session()
-        self._session.cookies = self._cookiejar
-        self._get = partial(self._session.get, cookies=self._cookiejar)
-        self._post = partial(self._session.post, cookies=self._cookiejar)
-        self._problems = []
-        self._page = None
-        self._soup = None
+        self._session.cookies = _cookiejar
+        self._get = self._session.get
+        self._post = self._session.post
 
     @property
     def _filename(self):
@@ -37,33 +36,26 @@ class LeetCode(cmd.Cmd):
 
     @property
     def prompt(self):
-        return '\n{}: {}\n> '.format(self._name, self._filename)
+        return '\n{}:{}> '.format(self._name, self._filename)
 
     def do_quit(self, arg):
-        '''
-        quit
-        :param arg:
-        :return:
-        '''
+        '''quit'''
         return True
 
     def do_list(self, arg):
-        '''
-        list problems
-        :param arg:
-        :return:
-        '''
-        r = self._get('https://leetcode.com/api/problems/all/').json()
+        '''list problems'''
+        r = self._get('https://leetcode.com/api/problems/all/',
+                      headers={
+                          'referer': 'https://leetcode.com/problemset/all/',
+                          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
+                          'x-requested-with': 'XMLHttpRequest'
+                      }).json()
         self._problems = r['stat_status_pairs']
         for p in self._problems:
             print('{status}\t{level}\t{question_id:4}\t{question__title}'.format(**p, **p['stat'], **p['difficulty']))
 
     def do_pick(self, arg):
-        '''
-        pick a problem with id, generate a file with description and sample code
-        :param arg:
-        :return:
-        '''
+        '''pick a problem with id, generate a file with description and sample code'''
         try:
             _id = int(arg.split()[0])
         except:
@@ -82,8 +74,6 @@ class LeetCode(cmd.Cmd):
 
         resp = self._get('https://leetcode.com/problems/{}/description/'.format(self._title)).content.decode()
         sp = BeautifulSoup(resp, 'lxml')
-        self._page = resp
-        self._soup = sp
 
         # get test cases
         testcase = re.findall("sampleTestCase:\s*'(.*)',\s*judgerAvailable:", resp)
@@ -98,10 +88,10 @@ class LeetCode(cmd.Cmd):
             return
 
         # get description
-        description = '# {}. {}\n#\n# {}'.format(self._id,
-                                                   sp.select('[property=og:title]')[0].get('content'),
-                                                   '\n# '.join(
-                                                       sp.select('[name=description]')[0].get('content').splitlines()))
+        description = '# {}. {}\n#\n# {}'.format(
+            self._id,
+            sp.select('[property=og:title]')[0].get('content'),
+            '\n# '.join(util.wrap_text(sp.select('[name=description]')[0].get('content')).splitlines()))
 
         # get default code
         default_code = ''
@@ -114,14 +104,12 @@ class LeetCode(cmd.Cmd):
         for d in l:
             if d['value'] == self._lang:
                 default_code = '\n'.join(d['defaultCode'].splitlines())
-        print(description, '# sampleTestCase: {}'.format(self._testcase), default_code, sep='\n#\n', file=open(self._filename, 'w'))
+        print(description, '# sampleTestCase: {}'.format(self._testcase), default_code, sep='\n#\n',
+              file=open(self._filename, 'w'))
         print('new file:', self._filename)
 
     def do_test(self, arg):
-        '''
-        test solution with test cases
-        :return:
-        '''
+        '''test solution with test cases'''
         if not self._id:
             print('please pick a problem first')
             return
@@ -142,7 +130,7 @@ class LeetCode(cmd.Cmd):
                               'origin': 'https://leetcode.com',
                               'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
                               'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
-                              'x-csrftoken': requests.utils.dict_from_cookiejar(self._cookiejar)['csrftoken'],
+                              'x-csrftoken': self._csrftoken,
                               'x-requested-with': 'XMLHttpRequest'
                           },
                           json={
@@ -163,12 +151,8 @@ class LeetCode(cmd.Cmd):
         result_yours = self.interpret(resp['interpret_id'])
         print('   yours:', result_yours['code_answer'])
 
-
     def do_submit(self, arg):
-        '''
-        submit current solution
-        :return:
-        '''
+        '''submit current solution'''
         if not self._id:
             print('please pick a problem first')
             return
@@ -182,7 +166,7 @@ class LeetCode(cmd.Cmd):
                               'origin': 'https://leetcode.com',
                               'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
                               'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
-                              'x-csrftoken': requests.utils.dict_from_cookiejar(self._cookiejar)['csrftoken'],
+                              'x-csrftoken': self._csrftoken,
                               'x-requested-with': 'XMLHttpRequest'
                           },
                           json={
@@ -194,10 +178,16 @@ class LeetCode(cmd.Cmd):
                               'typed_code': solution
                           })
         if resp.status_code != 200:
+            print('submit error', resp.content)
             print(resp.content)
             return
         submit_id = resp.json()['submission_id']
-        resp = self._get('https://leetcode.com/submissions/detail/{}/check/'.format(submit_id))
+        for i in range(100):
+            resp = self._get('https://leetcode.com/submissions/detail/{}/check/'.format(submit_id))
+            if resp.status_code != 200:
+                print('check submit error', resp.content)
+            elif resp.json()['state'] != 'PENDING' and resp.json()['state'] != 'STARTED':
+                break
         print(resp.json())
         pass
 
@@ -205,57 +195,40 @@ class LeetCode(cmd.Cmd):
     # alias
     # ============================
     def do_q(self, arg):
-        '''
-        alias for quit
-        :param arg:
-        :return:
-        '''
+        '''alias for quit'''
         return self.do_quit(arg)
 
     def do_l(self, arg):
-        '''
-        alias for list
-        :param arg:
-        :return:
-        '''
+        '''alias for list'''
         return self.do_list(arg)
 
     def do_p(self, arg):
-        '''
-        alias for pick
-        :param arg:
-        :return:
-        '''
+        '''alias for pick'''
         return self.do_pick(arg)
 
     def do_t(self, arg):
-        '''
-        alias for test
-        :return:
-        '''
+        '''alias for test'''
         return self.do_test(arg)
 
     def do_sub(self, arg):
-        '''
-        alias for submit
-        :return:
-        '''
+        '''alias for submit'''
         return self.do_submit(arg)
 
     def do_s(self, arg):
-        '''
-        alias for submit
-        :return:
-        '''
+        '''alias for submit'''
         return self.do_submit(arg)
 
+    def do_h(self, arg):
+        '''alias for help'''
+        return self.do_help(arg)
+
     def default(self, line):
-        '''
-        default to pick
-        :param line:
-        :return:
-        '''
+        '''default to pick'''
         return self.do_pick(line)
+
+    def emptyline(self):
+        '''override, prevent from repeating last command implicitly'''
+        pass
 
     # ============================
     # util
@@ -271,4 +244,3 @@ class LeetCode(cmd.Cmd):
             if resp['state'] != 'PENDING' and resp['state'] != 'STARTED':
                 return resp
             time.sleep(0.2)
-
