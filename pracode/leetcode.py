@@ -4,8 +4,8 @@ import re
 from functools import partial
 import time
 
-import browser_cookie3
 import requests
+import browser_cookie3
 from bs4 import BeautifulSoup
 
 from . import util
@@ -21,9 +21,12 @@ class LeetCode(cmd.Cmd):
         self._id = 0
         self._title = ''
         self._lang = 'python'
+        self._testcase = ''
         self._cookiejar = browser_cookie3.chrome(domain_name='leetcode.com')
-        self._get = partial(requests.get, cookies=self._cookiejar)
-        self._post = partial(requests.post, cookies=self._cookiejar)
+        self._session = requests.Session()
+        self._session.cookies = self._cookiejar
+        self._get = partial(self._session.get, cookies=self._cookiejar)
+        self._post = partial(self._session.post, cookies=self._cookiejar)
         self._problems = []
         self._page = None
         self._soup = None
@@ -81,6 +84,15 @@ class LeetCode(cmd.Cmd):
         sp = BeautifulSoup(resp, 'lxml')
         self._page = resp
         self._soup = sp
+
+        # get test cases
+        testcase = re.findall("sampleTestCase:\s*'(.*)',\s*judgerAvailable:", resp)
+        if len(testcase) == 1:
+            self._testcase = repr(util.unescape_unicode(testcase[0]))
+        else:
+            self._testcase = ''
+            print('no test cases found')
+
         if os.path.exists(self._filename):
             print('use existing file:', self._filename)
             return
@@ -90,12 +102,6 @@ class LeetCode(cmd.Cmd):
                                                    sp.select('[property=og:title]')[0].get('content'),
                                                    '\n# '.join(
                                                        sp.select('[name=description]')[0].get('content').splitlines()))
-        # get test cases
-        testcase = re.findall("sampleTestCase:\s*'(.*)',\s*judgerAvailable:", resp)
-        if len(testcase) == 1:
-            testcase = util.unescape_unicode(testcase[0])
-        else:
-            print('no test cases found')
 
         # get default code
         default_code = ''
@@ -108,7 +114,7 @@ class LeetCode(cmd.Cmd):
         for d in l:
             if d['value'] == self._lang:
                 default_code = '\n'.join(d['defaultCode'].splitlines())
-        print(description, '# sampleTestCase: {}'.format(repr(testcase)), default_code, sep='\n#\n', file=open(self._filename, 'w'))
+        print(description, '# sampleTestCase: {}'.format(self._testcase), default_code, sep='\n#\n', file=open(self._filename, 'w'))
         print('new file:', self._filename)
 
     def do_test(self, arg):
@@ -128,14 +134,8 @@ class LeetCode(cmd.Cmd):
         if arg.strip() != '':
             testcase = arg
         else:
-            testcase = re.findall('# sampleTestCase: (.*)$', solution, re.MULTILINE)
-            if len(testcase) == 0:
-                print('sampleTestCase not found in file, please provide it in command')
-                return
-            elif len(testcase) > 1:
-                print('multiple sampleTestCase found, use the first one')
-            testcase = testcase[0]
-        print('test case', testcase)
+            testcase = self._testcase
+        print('testcase:', testcase)
 
         resp = self._post('https://leetcode.com/problems/{}/interpret_solution/'.format(self._title),
                           headers={
@@ -162,14 +162,43 @@ class LeetCode(cmd.Cmd):
         print('expected:', result_expect['code_answer'])
         result_yours = self.interpret(resp['interpret_id'])
         print('   yours:', result_yours['code_answer'])
-        print('status:', result_yours['state'])
 
 
-    def do_submit(self):
+    def do_submit(self, arg):
         '''
         submit current solution
         :return:
         '''
+        if not self._id:
+            print('please pick a problem first')
+            return
+        if not os.path.exists(self._filename):
+            print('file missing:', self._filename)
+            return
+        solution = open(self._filename).read()
+
+        resp = self._post('https://leetcode.com/problems/{}/submit/'.format(self._title),
+                          headers={
+                              'origin': 'https://leetcode.com',
+                              'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
+                              'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
+                              'x-csrftoken': requests.utils.dict_from_cookiejar(self._cookiejar)['csrftoken'],
+                              'x-requested-with': 'XMLHttpRequest'
+                          },
+                          json={
+                              'data_input': eval(self._testcase),
+                              'judge_type': 'large',
+                              'lang': 'python',
+                              'question_id': str(self._id),
+                              'test_mode': False,
+                              'typed_code': solution
+                          })
+        if resp.status_code != 200:
+            print(resp.content)
+            return
+        submit_id = resp.json()['submission_id']
+        resp = self._get('https://leetcode.com/submissions/detail/{}/check/'.format(submit_id))
+        print(resp.json())
         pass
 
     # ============================
@@ -206,19 +235,19 @@ class LeetCode(cmd.Cmd):
         '''
         return self.do_test(arg)
 
-    def do_sub(self):
+    def do_sub(self, arg):
         '''
         alias for submit
         :return:
         '''
-        return self.do_submit()
+        return self.do_submit(arg)
 
-    def do_s(self):
+    def do_s(self, arg):
         '''
         alias for submit
         :return:
         '''
-        return self.do_submit()
+        return self.do_submit(arg)
 
     def default(self, line):
         '''
@@ -231,14 +260,15 @@ class LeetCode(cmd.Cmd):
     # ============================
     # util
     # ============================
+    # TODO: make this async
     def interpret(self, interpret_id):
-        for i in range(10):
+        for i in range(100):
             resp = self._get('https://leetcode.com/submissions/detail/{}/check/'.format(interpret_id))
             if resp.status_code != 200:
                 print('interpret error:', resp.content)
                 return
             resp = resp.json()
-            if resp['state'] != 'PENDING':
+            if resp['state'] != 'PENDING' and resp['state'] != 'STARTED':
                 return resp
-            time.sleep(0.1)
+            time.sleep(0.2)
 
