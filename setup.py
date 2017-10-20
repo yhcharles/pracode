@@ -13,7 +13,8 @@ setup(
     install_requires=[
         'requests',
         'bs4',
-        'browser_cookies3',
+        'browser_cookie3',
+        'ansicolors',
     ],
     entry_points = {
         'console_scripts': ['pracode=pracode.main:main'],

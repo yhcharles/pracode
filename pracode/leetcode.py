@@ -3,16 +3,24 @@ import os.path
 import re
 import time
 
-import requests
-import browser_cookie3
 from bs4 import BeautifulSoup
+import browser_cookie3
+import requests
 
 from . import util
+from .util import logger
+
+
+class Error(Exception):
+    def __init__(self, msg):
+        self._msg = msg
+
+    def __str__(self):
+        return self._msg
 
 
 class LeetCode(cmd.Cmd):
     intro = 'Welcome to pracode. Type help or ? to list commands.\n'
-    file = None
 
     def __init__(self):
         super().__init__()
@@ -23,12 +31,35 @@ class LeetCode(cmd.Cmd):
         self._lang = 'python'
         self._testcase = ''
 
-        _cookiejar = browser_cookie3.chrome(domain_name='leetcode.com')
-        self._csrftoken = requests.utils.dict_from_cookiejar(_cookiejar)['csrftoken']
-        self._session = requests.Session()
-        self._session.cookies = _cookiejar
-        self._get = self._session.get
-        self._post = self._session.post
+    @property
+    def _cookie(self):
+        return browser_cookie3.chrome(domain_name='leetcode.com')
+
+    @property
+    def _csrftoken(self):
+        return requests.utils.dict_from_cookiejar(self._cookie)['csrftoken']
+
+    def _request(self, url, headers={}, data=None, json=None):
+        h = {
+            'accept': 'application/json, text/javascript, */*; q=0.01',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.8',
+            'content-type': 'application/json',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
+        }
+        h.update(headers)
+        if data is None and json is None:
+            resp = requests.get(url, headers=h, cookies=self._cookie)
+        else:
+            resp = requests.post(url, headers=h, data=data, json=json, cookies=self._cookie)
+        if resp.status_code != 200:
+            raise Error('network request failed: {}'.format(resp.content))
+        return resp
+
+    def _xmlrequest(self, url, headers={}, data=None, json=None):
+        h = {'x-requested-with': 'XMLHttpRequest'}
+        h.update(headers)
+        return self._request(url, h, data, json)
 
     @property
     def _filename(self):
@@ -44,22 +75,27 @@ class LeetCode(cmd.Cmd):
 
     def do_list(self, arg):
         '''list problems'''
-        r = self._get('https://leetcode.com/api/problems/all/',
-                      headers={
-                          'referer': 'https://leetcode.com/problemset/all/',
-                          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
-                          'x-requested-with': 'XMLHttpRequest'
-                      }).json()
-        self._problems = r['stat_status_pairs']
+        self._problems = self._xmlrequest('https://leetcode.com/api/problems/all/',
+                                          headers={
+                                              'referer': 'https://leetcode.com/problemset/all/',
+                                          }).json()['stat_status_pairs']
         for p in self._problems:
-            print('{status}\t{level}\t{question_id:4}\t{question__title}'.format(**p, **p['stat'], **p['difficulty']))
+            msg = '{status}\t{level}\t{question_id:4}\t{question__title}'.format(**p, **p['stat'], **p['difficulty'])
+            if p['status'] is None:
+                logger.info(msg)
+            elif p['status'] == 'ac':
+                logger.success(msg)
+            else:
+                logger.error(msg)
 
     def do_pick(self, arg):
         '''pick a problem with id, generate a file with description and sample code'''
         try:
             _id = int(arg.split()[0])
-        except:
-            print('invalid problem id')
+        except EOFError:
+            self.do_quit(arg)
+        except (ValueError, IndexError):
+            logger.error('invalid problem id:', arg)
             return
 
         # find problem
@@ -69,10 +105,10 @@ class LeetCode(cmd.Cmd):
                 self._title = p['stat']['question__title_slug']
                 break
         else:
-            print('problem id not found')
+            logger.error('problem id not found')
             return
 
-        resp = self._get('https://leetcode.com/problems/{}/description/'.format(self._title)).content.decode()
+        resp = self._request('https://leetcode.com/problems/{}/description/'.format(self._title)).content.decode()
         sp = BeautifulSoup(resp, 'lxml')
 
         # get test cases
@@ -81,10 +117,10 @@ class LeetCode(cmd.Cmd):
             self._testcase = repr(util.unescape_unicode(testcase[0]))
         else:
             self._testcase = ''
-            print('no test cases found')
+            logger.error('no test cases found')
 
         if os.path.exists(self._filename):
-            print('use existing file:', self._filename)
+            logger.info('use existing file:', self._filename)
             return
 
         # get description
@@ -106,68 +142,52 @@ class LeetCode(cmd.Cmd):
                 default_code = '\n'.join(d['defaultCode'].splitlines())
         print(description, '# sampleTestCase: {}'.format(self._testcase), default_code, sep='\n#\n',
               file=open(self._filename, 'w'))
-        print('new file:', self._filename)
+        logger.info('new file:', self._filename)
 
     def do_test(self, arg):
         '''test solution with test cases'''
-        if not self._id:
-            print('please pick a problem first')
+        solution = self._load_solution()
+        if solution is None:
             return
-        if not os.path.exists(self._filename):
-            print('file missing:', self._filename)
-            return
-        solution = open(self._filename).read()
 
         # find test case
         if arg.strip() != '':
             testcase = arg
         else:
             testcase = self._testcase
-        print('testcase:', testcase)
+        logger.info('testcase:', testcase)
 
-        resp = self._post('https://leetcode.com/problems/{}/interpret_solution/'.format(self._title),
-                          headers={
-                              'origin': 'https://leetcode.com',
-                              'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
-                              'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
-                              'x-csrftoken': self._csrftoken,
-                              'x-requested-with': 'XMLHttpRequest'
-                          },
-                          json={
-                              'data_input': eval(testcase),
-                              'judge_type': 'large',
-                              'lang': 'python',
-                              'question_id': str(self._id),
-                              'test_mode': False,
-                              'typed_code': solution
-                          })
-        if resp.status_code != 200:
-            print('failed to send test request, respond:', resp.content)
-            return
-        resp = resp.json()
+        resp = self._xmlrequest('https://leetcode.com/problems/{}/interpret_solution/'.format(self._title),
+                                headers={
+                                    'origin': 'https://leetcode.com',
+                                    'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
+                                    'x-csrftoken': self._csrftoken,
+                                },
+                                json={
+                                    'data_input': eval(testcase),
+                                    'judge_type': 'large',
+                                    'lang': 'python',
+                                    'question_id': str(self._id),
+                                    'test_mode': False,
+                                    'typed_code': solution
+                                }).json()
 
-        result_expect = self.interpret(resp['interpret_expected_id'])
-        print('expected:', result_expect['code_answer'])
-        result_yours = self.interpret(resp['interpret_id'])
-        print('   yours:', result_yours['code_answer'])
+        # TODO: concurrently, colored
+        result_expect = self._interpret(resp['interpret_expected_id'])
+        logger.info('expected:', result_expect['code_answer'])
+        result_yours = self._interpret(resp['interpret_id'])
+        logger.info('   yours:', result_yours['code_answer'])
 
     def do_submit(self, arg):
         '''submit current solution'''
-        if not self._id:
-            print('please pick a problem first')
+        solution = self._load_solution()
+        if solution is None:
             return
-        if not os.path.exists(self._filename):
-            print('file missing:', self._filename)
-            return
-        solution = open(self._filename).read()
 
         resp = self._post('https://leetcode.com/problems/{}/submit/'.format(self._title),
                           headers={
-                              'origin': 'https://leetcode.com',
                               'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
-                              'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
                               'x-csrftoken': self._csrftoken,
-                              'x-requested-with': 'XMLHttpRequest'
                           },
                           json={
                               'data_input': eval(self._testcase),
@@ -177,19 +197,13 @@ class LeetCode(cmd.Cmd):
                               'test_mode': False,
                               'typed_code': solution
                           })
-        if resp.status_code != 200:
-            print('submit error', resp.content)
-            print(resp.content)
-            return
         submit_id = resp.json()['submission_id']
         for i in range(100):
-            resp = self._get('https://leetcode.com/submissions/detail/{}/check/'.format(submit_id))
-            if resp.status_code != 200:
-                print('check submit error', resp.content)
-            elif resp.json()['state'] != 'PENDING' and resp.json()['state'] != 'STARTED':
+            resp = self._xmlrequest('https://leetcode.com/submissions/detail/{}/check/'.format(submit_id))
+            if resp.json()['state'] != 'PENDING' and resp.json()['state'] != 'STARTED':
                 break
-        print(resp.json())
-        pass
+        # TODO: better formated result, and more details about time percentile
+        logger.info(resp.json())
 
     # ============================
     # alias
@@ -234,13 +248,26 @@ class LeetCode(cmd.Cmd):
     # util
     # ============================
     # TODO: make this async
-    def interpret(self, interpret_id):
+    def _interpret(self, interpret_id):
         for i in range(100):
-            resp = self._get('https://leetcode.com/submissions/detail/{}/check/'.format(interpret_id))
-            if resp.status_code != 200:
-                print('interpret error:', resp.content)
-                return
-            resp = resp.json()
+            resp = self._xmlrequest('https://leetcode.com/submissions/detail/{}/check/'.format(interpret_id)).json()
             if resp['state'] != 'PENDING' and resp['state'] != 'STARTED':
                 return resp
             time.sleep(0.2)
+
+    def cmdloop(self):
+        while True:
+            try:
+                super().cmdloop()
+                break
+            except Error as e:
+                logger.error(e)
+
+    def _load_solution(self):
+        if not self._id:
+            logger.error('please pick a problem first')
+            return
+        if not os.path.exists(self._filename):
+            logger.error('file missing:', self._filename)
+            return
+        return open(self._filename).read()
