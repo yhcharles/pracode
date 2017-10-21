@@ -184,7 +184,7 @@ class LeetCode(cmd.Cmd):
         if solution is None:
             return
 
-        resp = self._post('https://leetcode.com/problems/{}/submit/'.format(self._title),
+        resp = self._xmlrequest('https://leetcode.com/problems/{}/submit/'.format(self._title),
                           headers={
                               'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
                               'x-csrftoken': self._csrftoken,
