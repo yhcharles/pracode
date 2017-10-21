@@ -3,3 +3,4 @@ dist
 *.pyc
 pracode.egg-info
 *.swp
+*.log
