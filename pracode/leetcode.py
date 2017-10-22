@@ -2,13 +2,19 @@ import cmd
 import os.path
 import re
 import time
+import logging
+from pprint import pformat
+import json
+from json.decoder import JSONDecodeError
 
 from bs4 import BeautifulSoup
 import browser_cookie3
 import requests
 
 from . import util
-from .util import logger
+from .util import out
+
+logger = logging.getLogger(__name__)
 
 
 class Error(Exception):
@@ -48,10 +54,19 @@ class LeetCode(cmd.Cmd):
             'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
         }
         h.update(headers)
+        logger.debug('request:\nurl=%s\nheaders=%s\ncookies=%s\ndata=%s\njson=%s', url, pformat(headers),
+                     pformat(requests.utils.dict_from_cookiejar(self._cookie)),
+                     data, pformat(json))
         if data is None and json is None:
             resp = requests.get(url, headers=h, cookies=self._cookie)
         else:
             resp = requests.post(url, headers=h, data=data, json=json, cookies=self._cookie)
+
+        try:
+            logger.debug('response:\nstatus_code=%s\ncontent=%s\njson=%s', resp.status_code, resp.content,
+                         pformat(resp.json()))
+        except JSONDecodeError:
+            logger.debug('response:\nstatus_code=%s\ncontent=%s', resp.status_code, resp.content)
         if resp.status_code != 200:
             raise Error('network request failed: {}'.format(resp.content))
         return resp
@@ -82,11 +97,11 @@ class LeetCode(cmd.Cmd):
         for p in self._problems:
             msg = '{status}\t{level}\t{question_id:4}\t{question__title}'.format(**p, **p['stat'], **p['difficulty'])
             if p['status'] is None:
-                logger.info(msg)
+                out.info(msg)
             elif p['status'] == 'ac':
-                logger.success(msg)
+                out.success(msg)
             else:
-                logger.error(msg)
+                out.error(msg)
 
     def do_pick(self, arg):
         '''pick a problem with id, generate a file with description and sample code'''
@@ -95,7 +110,7 @@ class LeetCode(cmd.Cmd):
         except EOFError:
             self.do_quit(arg)
         except (ValueError, IndexError):
-            logger.error('invalid problem id:', arg)
+            out.error('invalid problem id: ' + arg)
             return
 
         # find problem
@@ -105,7 +120,7 @@ class LeetCode(cmd.Cmd):
                 self._title = p['stat']['question__title_slug']
                 break
         else:
-            logger.error('problem id not found')
+            out.error('problem id not found')
             return
 
         resp = self._request('https://leetcode.com/problems/{}/description/'.format(self._title)).content.decode()
@@ -117,10 +132,11 @@ class LeetCode(cmd.Cmd):
             self._testcase = repr(util.unescape_unicode(testcase[0]))
         else:
             self._testcase = ''
+            out.error('no test cases found')
             logger.error('no test cases found')
 
         if os.path.exists(self._filename):
-            logger.info('use existing file:', self._filename)
+            out.info('use existing file: ' + self._filename)
             return
 
         # get description
@@ -142,7 +158,7 @@ class LeetCode(cmd.Cmd):
                 default_code = '\n'.join(d['defaultCode'].splitlines())
         print(description, '# sampleTestCase: {}'.format(self._testcase), default_code, sep='\n#\n',
               file=open(self._filename, 'w'))
-        logger.info('new file:', self._filename)
+        out.info('new file: ' + self._filename)
 
     def do_test(self, arg):
         '''test solution with test cases'''
@@ -155,7 +171,7 @@ class LeetCode(cmd.Cmd):
             testcase = arg
         else:
             testcase = self._testcase
-        logger.info('testcase:', testcase)
+        out.info('testcase: ' + testcase)
 
         resp = self._xmlrequest('https://leetcode.com/problems/{}/interpret_solution/'.format(self._title),
                                 headers={
@@ -174,9 +190,12 @@ class LeetCode(cmd.Cmd):
 
         # TODO: concurrently, colored
         result_expect = self._interpret(resp['interpret_expected_id'])
-        logger.info('expected:', result_expect['code_answer'])
+        out.info('expected: ' + str(result_expect['code_answer']))
         result_yours = self._interpret(resp['interpret_id'])
-        logger.info('   yours:', result_yours['code_answer'])
+        if not result_yours.get('run_success'):
+            self.print_result(result_yours)
+        else:
+            out.info('   yours: ' + str(result_yours['code_answer']))
 
     def do_submit(self, arg):
         '''submit current solution'''
@@ -185,25 +204,46 @@ class LeetCode(cmd.Cmd):
             return
 
         resp = self._xmlrequest('https://leetcode.com/problems/{}/submit/'.format(self._title),
-                          headers={
-                              'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
-                              'x-csrftoken': self._csrftoken,
-                          },
-                          json={
-                              'data_input': eval(self._testcase),
-                              'judge_type': 'large',
-                              'lang': 'python',
-                              'question_id': str(self._id),
-                              'test_mode': False,
-                              'typed_code': solution
-                          })
+                                headers={
+                                    'referer': 'https://leetcode.com/problems/{}/description/'.format(self._title),
+                                    'x-csrftoken': self._csrftoken,
+                                },
+                                json={
+                                    'data_input': eval(self._testcase),
+                                    'judge_type': 'large',
+                                    'lang': 'python',
+                                    'question_id': str(self._id),
+                                    'test_mode': False,
+                                    'typed_code': solution
+                                })
         submit_id = resp.json()['submission_id']
         for i in range(100):
             resp = self._xmlrequest('https://leetcode.com/submissions/detail/{}/check/'.format(submit_id))
             if resp.json()['state'] != 'PENDING' and resp.json()['state'] != 'STARTED':
                 break
+            time.sleep(0.1)
         # TODO: better formated result, and more details about time percentile
-        logger.info(resp.json())
+        resp = resp.json()
+        if not resp.get('run_success'):
+            self.print_result(resp)
+        else:
+            out.success('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
+            out.success('Runtime: ' + resp.get('status_runtime'))
+            my_runtime, my_percent = float(resp.get('status_runtime').strip().split()[0]), 0.0
+            resp = self._request('https://leetcode.com/submissions/detail/{}/'.format(submit_id)).content.decode()
+            distr = re.findall("^\s*distribution_formatted: ('.*'),\s*$", resp, re.MULTILINE)
+            if len(distr) != 1:
+                logger.error('invalid distribution info')
+                return
+            distr = json.loads(eval(distr[0])).get('distribution')
+            if not distr:
+                logger.error('no distribution info found in json')
+                return
+            for runtime, percent in distr:
+                if float(runtime) <= my_runtime:
+                    my_percent += float(percent)
+            my_percent = 100.0 - my_percent
+            out.success('Your runtime beats {:.2f}% of {} submissions.'.format(my_percent, self._lang))
 
     # ============================
     # alias
@@ -253,7 +293,7 @@ class LeetCode(cmd.Cmd):
             resp = self._xmlrequest('https://leetcode.com/submissions/detail/{}/check/'.format(interpret_id)).json()
             if resp['state'] != 'PENDING' and resp['state'] != 'STARTED':
                 return resp
-            time.sleep(0.2)
+            time.sleep(0.1)
 
     def cmdloop(self):
         while True:
@@ -261,13 +301,25 @@ class LeetCode(cmd.Cmd):
                 super().cmdloop()
                 break
             except Error as e:
-                logger.error(e)
+                out.error(e)
 
     def _load_solution(self):
         if not self._id:
-            logger.error('please pick a problem first')
+            out.error('please pick a problem first')
             return
         if not os.path.exists(self._filename):
-            logger.error('file missing:', self._filename)
+            out.error('file missing: ' + self._filename)
             return
         return open(self._filename).read()
+
+    def print_result(self, resp):
+        if 'runtime_error' in resp:
+            out.error('Runtime Error Message: ' + resp.get('runtime_error'))
+            out.error('Last executed input: ' + resp.get('last_testcase'))
+        elif 'compile_error' in resp:
+            out.error('Compile Error: ' + resp.get('compile_error'))
+        else:
+            out.info('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
+            out.info('   Input: ' + resp.get('input'))
+            out.info('  Output: ' + resp.get('code_output'))
+            out.info('Expected: ' + resp.get('expected_output'))

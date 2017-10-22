@@ -9,7 +9,7 @@ def unescape_unicode(s):
 def wrap_text(s):
     return '\n'.join(map(lambda x: textwrap.fill(x), s.splitlines()))
 
-class Logger(object):
+class ColorStdout(object):
     def _out(self, *msg):
         print(*msg, file=sys.stderr)
 
@@ -21,5 +21,5 @@ class Logger(object):
         self._out(colors.red(*msg))
     def success(self, *msg):
         self._out(colors.green(*msg))
-logger = Logger()
+out = ColorStdout()
 
