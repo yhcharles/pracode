@@ -95,7 +95,7 @@ class LeetCode(cmd.Cmd):
                                               'referer': 'https://leetcode.com/problemset/all/',
                                           }).json()['stat_status_pairs']
         for p in self._problems:
-            msg = '{status}\t{level}\t{question_id:4}\t{question__title}'.format(**p, **p['stat'], **p['difficulty'])
+            msg = '{question_id:4}\t{status}\t{level}\t{question__title}'.format(**p, **p['stat'], **p['difficulty'])
             if p['status'] is None:
                 out.info(msg)
             elif p['status'] == 'ac':
@@ -108,8 +108,10 @@ class LeetCode(cmd.Cmd):
         try:
             _id = int(arg.split()[0])
         except EOFError:
-            self.do_quit(arg)
+            return self.do_quit(arg)
         except (ValueError, IndexError):
+            if arg == 'EOF':
+                return self.do_quit(arg)
             out.error('invalid problem id: ' + arg)
             return
 
@@ -192,7 +194,7 @@ class LeetCode(cmd.Cmd):
         result_expect = self._interpret(resp['interpret_expected_id'])
         out.info('expected: ' + str(result_expect['code_answer']))
         result_yours = self._interpret(resp['interpret_id'])
-        if not result_yours.get('run_success'):
+        if result_yours.get('status_code') != 10:
             self.print_result(result_yours)
         else:
             out.info('   yours: ' + str(result_yours['code_answer']))
@@ -224,7 +226,7 @@ class LeetCode(cmd.Cmd):
             time.sleep(0.1)
         # TODO: better formated result, and more details about time percentile
         resp = resp.json()
-        if not resp.get('run_success'):
+        if resp.get('status_code') != 10:
             self.print_result(resp)
         else:
             out.success('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
@@ -313,13 +315,49 @@ class LeetCode(cmd.Cmd):
         return open(self._filename).read()
 
     def print_result(self, resp):
-        if 'runtime_error' in resp:
-            out.error('Runtime Error Message: ' + resp.get('runtime_error'))
-            out.error('Last executed input: ' + resp.get('last_testcase'))
-        elif 'compile_error' in resp:
-            out.error('Compile Error: ' + resp.get('compile_error'))
+        '''
+        case 10:return"Accepted";
+        case 11:return"Wrong Answer";
+        case 12:return"Memory Limit Exceeded";
+        case 13:return"Output Limit Exceeded";
+        case 14:return"Time Limit Exceeded";
+        case 15:return"Runtime Error";
+        case 16:return"Internal Error";
+        case 20:return"Compile Error";
+        case 21:return"Unknown Error";
+        case 30:return"Timeout";
+        default:return"Invalid Error Code"
+        :param resp:
+        :return:
+        '''
+
+        status_code = resp.get('status_code')
+        if status_code == 11:
+            out.error('Wrong Answer')
+            out.error('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
+            out.error('   Input: {}'.format(resp.get('input')))
+            out.error('  Output: {}'.format(resp.get('code_output')))
+            out.error('Expected: {}'.format(resp.get('expected_output')))
+        elif status_code == 12:
+            out.error('Memory Limit Exceeded')
+            out.error('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
+            out.error('Last executed input: {}'.format(resp.get('last_testcase', '')))
+        elif status_code == 13:
+            out.error('Output Limit Exceeded')
+        elif status_code == 14:
+            out.error('Time Limit Exceeded')
+            out.error('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
+            out.error('Last executed input: {}'.format(resp.get('last_testcase', '')))
+        elif status_code == 15:
+            out.error('Runtime Error Message: {}'.format(resp.get('runtime_error')))
+            out.error('Last executed input: {}'.format(resp.get('last_testcase', '')))
+        elif status_code == 16:
+            out.error('Internal Error')
+        elif status_code == 20:
+            out.error('Compile Error: {}'.format(resp.get('compile_error')))
+        elif status_code == 21:
+            out.error('Unknown Error')
+        elif status_code == 30:
+            out.error('Timeout')
         else:
-            out.info('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
-            out.info('   Input: ' + resp.get('input'))
-            out.info('  Output: ' + resp.get('code_output'))
-            out.info('Expected: ' + resp.get('expected_output'))
+            out.error('Invalid Error Code')
