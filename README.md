@@ -42,7 +42,9 @@ performance:
 - optimize all the network request, maybe asyncio?
 
 ux:
-- better formatted, detailed submission result
+- use `prompt_toolkit` instead of `cmd` package
+- filter/pager for list
+- more browsers/platforms, auto detect login status
 - better looking refer to the `leetcode-cli` project
 - more programming languages
 - more websites
