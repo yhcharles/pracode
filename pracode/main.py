@@ -3,7 +3,7 @@
 import argparse
 import logging
 
-from .leetcode import LeetCode
+from pracode.leetcode import LeetCode
 
 
 def create_parser():

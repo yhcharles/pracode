@@ -9,7 +9,7 @@ and [leetcode-cli](https://www.npmjs.com/package/leetcode-cli).
 
 # Features
 
-- using login status from your browser
+- ~~using login status from your browser~~
 - list questions
 - pick a question, generate a local file with default code
 - test your solution in local file, with customizable test cases

@@ -1,18 +1,20 @@
 import cmd
+import html
+import json
+import logging
 import os.path
 import re
 import time
-import logging
-from pprint import pformat
-import json
 from json.decoder import JSONDecodeError
+from pprint import pformat
 
-from bs4 import BeautifulSoup
+# import browsercookie
 import browser_cookie3
 import requests
+from bs4 import BeautifulSoup
 
-from . import util
-from .util import out
+from pracode import util
+from pracode.util import out
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +41,27 @@ class LeetCode(cmd.Cmd):
 
     @property
     def _cookie(self):
-        return browser_cookie3.chrome(domain_name='leetcode.com')
+        return browser_cookie3.firefox(domain_name='leetcode.com')
+        #return browser_cookie3.chrome(domain_name='leetcode.com')
+        # return browsercookie.chrome()
 
     @property
     def _csrftoken(self):
         return requests.utils.dict_from_cookiejar(self._cookie)['csrftoken']
+        # for ck in self._cookie:
+        #    if ck.domain.endswith('leetcode.com') and ck.name == 'csrftoken':
+        #        return ck.value
 
     def _request(self, url, headers={}, data=None, json=None):
         h = {
             'accept': 'application/json, text/javascript, */*; q=0.01',
             'accept-encoding': 'gzip, deflate, br',
             'accept-language': 'en-US,en;q=0.8',
+            'Cache-Control': 'max-age=0',
             'content-type': 'application/json',
-            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
+            #'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.11; rv:57.0) Gecko/20100101 Firefox/57.0',
+            'Host': 'leetcode.com',
         }
         h.update(headers)
         logger.debug('request:\nurl=%s\nheaders=%s\ncookies=%s\ndata=%s\njson=%s', url, pformat(headers),
@@ -146,6 +156,7 @@ class LeetCode(cmd.Cmd):
             self._id,
             sp.select('[property=og:title]')[0].get('content'),
             '\n# '.join(util.wrap_text(sp.select('[name=description]')[0].get('content')).splitlines()))
+        description = html.unescape(description)
 
         # get default code
         default_code = ''
@@ -191,6 +202,9 @@ class LeetCode(cmd.Cmd):
                                 }).json()
 
         # TODO: concurrently, colored
+        if resp.get('error'):
+            out.error(resp.get('error'))
+            return
         result_expect = self._interpret(resp['interpret_expected_id'])
         out.info('expected: ' + str(result_expect['code_answer']))
         result_yours = self._interpret(resp['interpret_id'])
@@ -335,22 +349,22 @@ class LeetCode(cmd.Cmd):
         if status_code == 11:
             out.error('Wrong Answer')
             out.error('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
-            out.error('   Input: {}'.format(resp.get('input')))
-            out.error('  Output: {}'.format(resp.get('code_output')))
+            out.error('   Input: {!r}'.format(resp.get('input')))
             out.error('Expected: {}'.format(resp.get('expected_output')))
+            out.error('  Output: {}'.format(resp.get('code_output')))
         elif status_code == 12:
             out.error('Memory Limit Exceeded')
             out.error('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
-            out.error('Last executed input: {}'.format(resp.get('last_testcase', '')))
+            out.error('Last executed input: {!r}'.format(resp.get('last_testcase')))
         elif status_code == 13:
             out.error('Output Limit Exceeded')
         elif status_code == 14:
             out.error('Time Limit Exceeded')
             out.error('{} / {} test cases passed.'.format(resp.get('total_correct'), resp.get('total_testcases')))
-            out.error('Last executed input: {}'.format(resp.get('last_testcase', '')))
+            out.error('Last executed input: {!r}'.format(resp.get('last_testcase')))
         elif status_code == 15:
             out.error('Runtime Error Message: {}'.format(resp.get('runtime_error')))
-            out.error('Last executed input: {}'.format(resp.get('last_testcase', '')))
+            out.error('Last executed input: {!r}'.format(resp.get('last_testcase')))
         elif status_code == 16:
             out.error('Internal Error')
         elif status_code == 20:
