@@ -25,7 +25,6 @@ class LeetCode(cmd.Cmd):
         super().__init__()
         self._name = 'LCW'
         self._problems = []
-        self._id = 0
         self._filename = ''
         self._title = ''
         self._lang = 'python'
@@ -60,7 +59,7 @@ class LeetCode(cmd.Cmd):
         file_list = glob.glob('./{}.*.py'.format(_id))
         if not file_list:
             # leetcode -g -x -l python show
-            self._cmd.show(g=True, x=True, l='python')
+            self._cmd.show(_id, g=True, x=True, l='python')
 
         file_list = glob.glob('./{}.*.py'.format(_id))
         if not file_list:
