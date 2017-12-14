@@ -3,7 +3,8 @@
 import argparse
 import logging
 
-from .leetcode import LeetCode
+# from pracode.leetcode import LeetCode
+from pracode.lcwrapper import LeetCode
 
 
 def create_parser():
@@ -31,6 +32,7 @@ def main():
     args = create_parser().parse_args()
     init_logger(args)
     LeetCode().cmdloop()
+
     print('bye!')
 
 

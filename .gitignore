@@ -4,3 +4,4 @@ dist
 pracode.egg-info
 *.swp
 *.log
+*.ipynb
