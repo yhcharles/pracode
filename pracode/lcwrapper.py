@@ -27,7 +27,7 @@ class LeetCode(cmd.Cmd):
         self._problems = []
         self._filename = ''
         self._title = ''
-        self._lang = 'python'
+        self._lang = 'python3'
         self._testcase = ''
         _sh = sh(_out=sys.stdout, _err=sys.stderr)
         self._cmd = _sh.leetcode
@@ -56,12 +56,12 @@ class LeetCode(cmd.Cmd):
             out.error('invalid problem id: ' + arg)
             return
 
-        file_list = glob.glob('./{}.*.py'.format(_id))
+        file_list = glob.glob('./{}.*.python3.py'.format(_id))
         if not file_list:
             # leetcode -g -x -l python show
-            self._cmd.show(_id, g=True, x=True, l='python')
+            self._cmd.show(_id, g=True, x=True, l=self._lang)
 
-        file_list = glob.glob('./{}.*.py'.format(_id))
+        file_list = glob.glob('./{}.*.python3.py'.format(_id))
         if not file_list:
             out.error('failed to pick problem: {}'.format(_id))
             return
